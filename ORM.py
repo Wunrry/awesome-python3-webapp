@@ -13,17 +13,18 @@ __author__ = 'Ayayaneru'
 # *** day03 begin ***
 
 import asyncio, logging, aiomysql
-
+__pool = None
 # 创建基本日志函数，变量 sql 出现了很多次，这里我们还不知道它的作用
 def log(sql, args=()):
     logging.info('SQL: %s' % sql)
 
 # 异步IO起手式 async ，创建连接池函数， pool 用法见下：
 # https://aiomysql.readthedocs.io/en/latest/pool.html?highlight=create_pool
-async def create_pool(loop, **kw):
+async def create_pool(**kw):
     logging.info('create database connection pool...')
     # 声明 __pool 为全局变量
     global __pool
+    loop = asyncio.get_running_loop()
     # 使用这些基本参数来创建连接池
     # await 和 async 是联动的（异步IO）
     __pool = await aiomysql.create_pool(
@@ -39,6 +40,12 @@ async def create_pool(loop, **kw):
         loop=loop
     )
 
+async def close_pool():
+    global __pool
+    if __pool:
+        __pool.close()
+        await __pool.wait_closed()  
+        
 async def select(sql, args, size=None):
     log(sql, args)
     global __pool

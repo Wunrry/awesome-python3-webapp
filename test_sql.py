@@ -73,7 +73,9 @@ from models import User, Blog, Comment
 async def test(loop):                      # *** 注意此处的密码填自己设的密码 ***
     await ORM.create_pool(loop=loop, user='root', password='password', db='moe')
                                            # *** 注意此处的密码填自己设的密码 ***
-    u = User(name='Test', email='test@qq.com', passwd='1234567890', image='about:blank')
+    # u = User(name='Test', email='test@qq.com', passwd='1234567890', image='about:blank')
+    u = User(name='Administrator', email='admin@qq.com', passwd='00000000', image='about:blank')
+    # u = User(name='Wunry', email='wunrry@qq.com', passwd='88888888', image='about:blank')
     await u.save()
     ## 网友指出添加到数据库后需要关闭连接池，否则会报错 RuntimeError: Event loop is closed
     ORM.__pool.close()

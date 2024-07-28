@@ -41,11 +41,24 @@ def init_jinja2(app, **kw):
             env.filters[name] = f
     app['__templating__'] = env
 
+"""
 async def logger_factory(app, handler):
     async def logger(request):
         logging.info('Request: %s %s' % (request.method, request.path))
         # await asyncio.sleep(0.3)
         return (await handler(request))
+    return logger
+"""
+async def logger_factory(app, handler):
+    async def logger(request):
+        logging.info('Request: %s %s' % (request.method, request.path))
+        try:
+            response = await handler(request)
+            return response
+        except Exception as e:
+            logging.error('Error in logger: %s' % str(e))
+            logging.exception(e)
+            raise
     return logger
 
 async def data_factory(app, handler):
@@ -59,11 +72,13 @@ async def data_factory(app, handler):
                 logging.info('request form: %s' % str(request.__data__))
         return (await handler(request))
     return parse_data
-
+"""
 async def response_factory(app, handler):
     async def response(request):
         logging.info('Response handler...')
+        logging.info('Request: %s %s' % (request.method, request.path))
         r = await handler(request)
+        logging.info('Handler returned type: %s,content:%s' % type(r),str(r))
         if isinstance(r, web.StreamResponse):
             return r
         if isinstance(r, bytes):
@@ -78,6 +93,7 @@ async def response_factory(app, handler):
             return resp
         if isinstance(r, dict):
             template = r.get('__template__')
+            logging.info('Template: %s' % template)
             if template is None:
                 resp = web.Response(body=json.dumps(r, ensure_ascii=False, default=lambda o: o.__dict__).encode('utf-8'))
                 resp.content_type = 'application/json;charset=utf-8'
@@ -87,17 +103,67 @@ async def response_factory(app, handler):
                 resp.content_type = 'text/html;charset=utf-8'
                 return resp
         if isinstance(r, int) and r >= 100 and r < 600:
-            return web.Response(text=r)
+            return web.Response(text=str(r))
         if isinstance(r, tuple) and len(r) == 2:
             t, m = r
             if isinstance(t, int) and t >= 100 and t < 600:
-                return web.Response(text=t,body=str(m))
+                return web.Response(text=str(t),body=str(m))
         # default:
         resp = web.Response(body=str(r).encode('utf-8'))
         resp.content_type = 'text/plain;charset=utf-8'
         return resp
     return response
-
+"""
+async def response_factory(app, handler):
+    async def response(request):
+        logging.info('Response handler...')
+        try:
+            r = await handler(request)
+            logging.info('Handler returned: %s' % str(r))
+            if isinstance(r, web.StreamResponse):
+                return r
+            if isinstance(r, bytes):
+                resp = web.Response(body=r)
+                resp.content_type = 'application/octet-stream'
+                return resp
+            if isinstance(r, str):
+                if r.startswith('redirect:'):
+                    return web.HTTPFound(r[9:])
+                resp = web.Response(body=r.encode('utf-8'))
+                resp.content_type = 'text/html;charset=utf-8'
+                return resp
+            if isinstance(r, dict):
+                template = r.get('__template__')
+                logging.info('Template: %s' % template)
+                if template is None:
+                    resp = web.Response(body=json.dumps(r, ensure_ascii=False, default=lambda o: o.__dict__).encode('utf-8'))
+                    resp.content_type = 'application/json;charset=utf-8'
+                    return resp
+                else:
+                    try:
+                        body = app['__templating__'].get_template(template).render(**r).encode('utf-8')
+                        logging.info('Rendered template successfully')
+                        resp = web.Response(body=body)
+                        resp.content_type = 'text/html;charset=utf-8'
+                        return resp
+                    except Exception as e:
+                        logging.error('Error rendering template: %s' % str(e))
+                        raise
+            if isinstance(r, int) and r >= 100 and r < 600:
+                return web.Response(text=str(r))
+            if isinstance(r, tuple) and len(r) == 2:
+                t, m = r
+                if isinstance(t, int) and t >= 100 and t < 600:
+                    return web.Response(text=str(t), body=str(m))
+            # default:
+            resp = web.Response(body=str(r).encode('utf-8'))
+            resp.content_type = 'text/plain;charset=utf-8'
+            return resp
+        except Exception as e:
+            logging.error('Error in response: %s' % str(e))
+            logging.exception(e)
+            raise
+    return response
 def datetime_filter(t):
     delta = int(time.time() - t)
     if delta < 60:
@@ -110,9 +176,9 @@ def datetime_filter(t):
         return u'%s天前' % (delta // 86400)
     dt = datetime.fromtimestamp(t)
     return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
-
+"""
 async def init(loop):
-    await ORM.create_pool(loop=loop, host='127.0.0.1', port=3306, user='root', password='369874125', db='moe')
+    await ORM.create_pool(loop=loop, host='127.0.0.1', port=3306, user='root', password='password', db='moe')
     app = web.Application(loop=loop, middlewares=[
         logger_factory, response_factory
     ])
@@ -126,3 +192,29 @@ async def init(loop):
 loop = asyncio.get_event_loop()
 loop.run_until_complete(init(loop))
 loop.run_forever()
+"""
+async def init():
+    await ORM.create_pool( host='127.0.0.1', port=3306, user='root', password='password', db='moe')
+    app = web.Application(middlewares=[logger_factory, response_factory])
+    init_jinja2(app, filters=dict(datetime=datetime_filter))
+    add_routes(app, 'handlers')
+    add_static(app)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    srv = web.TCPSite(runner, '127.0.0.1', 9000)
+    await srv.start()
+    logging.info('server started at http://127.0.0.1:9000...')
+    return srv
+
+async def main():
+    r = await init()
+    while True:
+        try:
+            await asyncio.sleep(3600)
+        except (KeyboardInterrupt, SystemExit):
+            logging.info('Shutting down...')
+        finally:
+            await r.cleanup()
+            await ORM.close_pool()
+    
+asyncio.run(main())
